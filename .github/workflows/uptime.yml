@@ -92,11 +92,22 @@ jobs:
             echo "All good; nothing was open."
           fi
 
+      # Mark the run itself red when the site was down, AFTER the issue has been
+      # handled. Two reasons: the Actions history then tells the truth at a
+      # glance instead of showing green through an outage, and GitHub's
+      # failed-run email becomes a second, independent way of hearing about it —
+      # useful if the issue mail ever gets filtered.
+      - name: Fail the run if anything was down
+        if: steps.probe.outputs.failed != '0'
+        run: |
+          echo "::error::One or more endpoints failed every attempt — see the outage issue."
+          exit 1
+
       # GitHub disables a cron schedule after 60 days with no repository
       # activity, which would silently switch this monitor off — the exact
       # failure a monitor must not have. One tiny commit a day keeps it awake.
       - name: Daily heartbeat
-        if: github.event_name == 'schedule'
+        if: always() && github.event_name == 'schedule'
         run: |
           TODAY=$(date -u +%F)
           if [ "$(cat .heartbeat 2>/dev/null)" = "$TODAY" ]; then

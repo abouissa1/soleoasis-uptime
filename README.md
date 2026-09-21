@@ -22,8 +22,12 @@ disagreement is itself the useful signal.
 ## How you are told
 
 A failed check **opens an issue**; a passing check **closes it**. GitHub emails
-the repository owner for both, so you get one message when something breaks and
-one when it recovers — not a new one every 15 minutes.
+the repository owner for both, so you hear once when something breaks and once
+when it recovers — not a new message every 15 minutes while it stays broken.
+
+A failing run is also marked red, which gives a second, independent way of
+hearing about it (GitHub's failed-run email) and keeps the Actions history
+honest — green through an outage would be worse than useless.
 
 ## Why this repository is public
 
