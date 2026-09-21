@@ -4,9 +4,9 @@ name: uptime
 #
 # Alerting is deliberately GitHub-native: a failure opens an issue, a recovery
 # closes it. GitHub emails the repo owner for both, so there is no API key
-# anywhere in this repository and nothing to rotate or leak. Exactly two emails
-# per incident — one when it breaks, one when it comes back — with the issue
-# body kept current in between rather than a new message every 15 minutes.
+# anywhere in this repository and nothing to rotate or leak. While an outage
+# continues the issue BODY is refreshed rather than commented on, so a long
+# outage does not mean a message every 15 minutes.
 
 on:
   schedule:
