@@ -1,0 +1,110 @@
+name: uptime
+
+# Checks the public Sole Oasis endpoints from outside our own infrastructure.
+#
+# Alerting is deliberately GitHub-native: a failure opens an issue, a recovery
+# closes it. GitHub emails the repo owner for both, so there is no API key
+# anywhere in this repository and nothing to rotate or leak. Exactly two emails
+# per incident — one when it breaks, one when it comes back — with the issue
+# body kept current in between rather than a new message every 15 minutes.
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      simulate_failure:
+        description: 'Check a deliberately broken URL, to prove alerting works'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # daily heartbeat commit (see keepalive below)
+  issues: write     # open / close the outage issue
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Probe the endpoints
+        id: probe
+        run: |
+          if [ "${{ inputs.simulate_failure }}" = "true" ]; then
+            echo "::warning::SIMULATED failure — checking a URL that cannot work."
+            export TARGETS="simulated outage|https://this-host-does-not-exist.soleoasis.invalid/|-"
+            export ATTEMPTS=2 GAP_SECONDS=2 MAX_TIME=5
+          fi
+          set +e
+          REPORT=report.md ./check.sh
+          echo "failed=$?" >> "$GITHUB_OUTPUT"
+          set -e
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open or refresh the outage issue
+        if: steps.probe.outputs.failed != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RUN="[this run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          {
+            echo "Sole Oasis did not answer when checked from a GitHub runner —"
+            echo "a different network and continent from our own server."
+            echo
+            cat report.md
+            echo
+            echo "Latest check: $RUN"
+            echo
+            echo "**What this means.** The origin server may still be perfectly healthy;"
+            echo "this says the site was unreachable *from the public internet*, which is"
+            echo "what a customer experiences. Compare against the origin before blaming"
+            echo "the app. This issue closes itself when the next check passes."
+          } > body.md
+
+          EXISTING=$(gh issue list --label outage --state open --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            # Already alerted. Keep the body current WITHOUT sending another email.
+            gh issue edit "$EXISTING" --body-file body.md
+            echo "Refreshed existing issue #$EXISTING (no new notification)."
+          else
+            gh issue create --title "🔴 Sole Oasis unreachable from outside" \
+              --label outage --body-file body.md
+          fi
+
+      - name: Close the outage issue on recovery
+        if: steps.probe.outputs.failed == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          EXISTING=$(gh issue list --label outage --state open --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            { echo "✅ Recovered — every endpoint answered."; echo; cat report.md; } > ok.md
+            gh issue comment "$EXISTING" --body-file ok.md
+            gh issue close "$EXISTING"
+            echo "Closed #$EXISTING."
+          else
+            echo "All good; nothing was open."
+          fi
+
+      # GitHub disables a cron schedule after 60 days with no repository
+      # activity, which would silently switch this monitor off — the exact
+      # failure a monitor must not have. One tiny commit a day keeps it awake.
+      - name: Daily heartbeat
+        if: github.event_name == 'schedule'
+        run: |
+          TODAY=$(date -u +%F)
+          if [ "$(cat .heartbeat 2>/dev/null)" = "$TODAY" ]; then
+            echo "Already beat today."; exit 0
+          fi
+          echo "$TODAY" > .heartbeat
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .heartbeat
+          git commit -m "heartbeat $TODAY"
+          git push
