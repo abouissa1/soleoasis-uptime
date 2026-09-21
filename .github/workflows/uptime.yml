@@ -47,6 +47,22 @@ jobs:
           set -e
           cat report.md >> "$GITHUB_STEP_SUMMARY"
 
+      # Today's incident was INTERMITTENT — roughly one connection in twenty
+      # died while the rest were fine. A check that only shouts when everything
+      # is down would have stayed green through most of it. A target that only
+      # answered on the second or third try is not healthy, so surface it as a
+      # warning on the run: visible when scanning the history, no email, no
+      # alert fatigue. Repeated warnings across runs are the pattern to look for.
+      - name: Note any degradation
+        if: always()
+        run: |
+          if grep -q 'recovered on try' report.md 2>/dev/null; then
+            grep -o '| [^|]* | ✅ ok (recovered on try [0-9]*)' report.md \
+              | sed 's/^| //; s/ | ✅ ok (recovered on try /: needed try /; s/)$//' \
+              | while read -r line; do echo "::warning::degraded — $line"; done
+            echo '⚠️ Some endpoints only answered after a retry — see the table above.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Open or refresh the outage issue
         if: steps.probe.outputs.failed != '0'
         env:
